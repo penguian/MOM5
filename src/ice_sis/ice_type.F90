@@ -5,7 +5,7 @@
 module ice_type_mod
 
   use mpp_mod,          only: mpp_pe, mpp_root_pe, mpp_sum, mpp_clock_id, CLOCK_COMPONENT, &
-                              CLOCK_LOOP, CLOCK_ROUTINE, stdout,input_nml_file
+                              CLOCK_LOOP, CLOCK_ROUTINE, stdout, input_nml_file, mpp_error
   use mpp_domains_mod,  only: domain2D, mpp_update_domains, CORNER, BGRID_NE
   use fms_mod,          only: file_exist, open_namelist_file, check_nml_error, write_version_number,&
                               read_data, close_file, field_exist, &
@@ -126,6 +126,7 @@ public  :: iceClocka,iceClockb,iceClockc
   real    :: ssh_gravity        = 9.81   ! Gravity parameter used in channel viscosity parameterization (m/s^2)
   real    :: chan_cfl_limit     = 0.25   ! CFL limit for channel viscosity parameterization (dimensionless)
   logical :: do_sun_angle_for_alb = .false.! find the sun angle for ocean albed in the frame of the ice model
+  logical :: write_a_restart    = .true. ! write a restart file
   integer :: layout(2)          = (/0, 0/)
   integer :: io_layout(2)       = (/0, 0/)
   ! mask_table contains information for masking domain ( n_mask, layout and mask_list).
@@ -157,7 +158,7 @@ public  :: iceClocka,iceClockb,iceClockc
                            t_range_melt, cm2_bugs, ks, h_lo_lim, verbose,        &
                            do_icebergs, add_diurnal_sw, io_layout, channel_viscosity,&
                            smag_ocn, ssh_gravity, chan_cfl_limit, do_sun_angle_for_alb, &
-                           mask_table, reproduce_siena_201303
+                           write_a_restart, mask_table, reproduce_siena_201303
 
   logical :: do_init = .false.
   real    :: hlim(8) = (/ 0.0, 0.1, 0.3, 0.7, 1.1, 1.5, 2.0, 2.5 /) ! thickness limits 1...num_part-1
@@ -252,8 +253,8 @@ public  :: iceClocka,iceClockb,iceClockc
      real,    pointer, dimension(:,:)   :: vmask               =>NULL() ! where ice vels can be non-zero
      real,    pointer, dimension(:,:)   :: mi                  =>NULL() ! This is needed for the wave model. It is introduced here,
                                                                         ! because flux_ice_to_ocean cannot handle 3D fields. This may be
-									! removed, if the information on ice thickness can be derived from 
-									! eventually from h_ice outside the ice module.
+                                                                        ! removed, if the information on ice thickness can be derived from
+                                                                        ! eventually from h_ice outside the ice module.
      real,    pointer, dimension(:,:,:) :: wnd                 =>NULL() ! need 10m wind speed to deduce Stokes drift etc in QL_KF_17
      logical, pointer, dimension(:,:)   :: maskmap             =>NULL() ! A pointer to an array indicating which
                                                                         ! logical processors are actually used for
@@ -376,6 +377,11 @@ public  :: iceClocka,iceClockb,iceClockc
     write (stdlogunit, ice_model_nml)
 
     call write_version_number(version, tagname)
+
+    if(.not. write_a_restart) then
+       write(stdoutunit,'(a)') '==>Note: running ice_model_init with write_a_restart=.false.'
+       write(stdoutunit,'(a)') '   Will NOT write restart file, and so cannot restart the run.'
+    endif
 
     if (spec_ice) then
        slab_ice = .true.
@@ -738,6 +744,9 @@ public  :: iceClocka,iceClockb,iceClockc
 
     integer           :: unit
     character(len=22) :: restart='RESTART/ice_model.res'
+    integer           :: stdoutunit
+
+    stdoutunit = stdout()
 
     if (conservation_check) then
        do k=1,4
@@ -757,7 +766,12 @@ public  :: iceClocka,iceClockb,iceClockc
        end if
     end if
 
-    call ice_model_restart()
+    if(.not. write_a_restart) then
+       write(stdoutunit,'(/a)') '==>Warning from ice_type_mod (ice_model_end): NO restart written.'
+       call mpp_error(WARNING,'==>Warning from ice_type_mod (ice_model_end): NO restart written.')
+    else
+       call ice_model_restart()
+    end if
 
     !--- release memory ------------------------------------------------
     call ice_grid_end()

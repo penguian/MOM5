@@ -378,7 +378,7 @@ subroutine ocean_velocity_init (Grid, Domain, Time, Time_steps, Ocean_options, &
   if(.not. write_a_restart) then 
     write(stdoutunit,'(a)') '==>Note: running ocean_velocity with write_a_restart=.false.'
     write(stdoutunit,'(a)') '   Will NOT write restart file, and so cannot restart the run.'
-  endif 
+  endif
 
   Dom => Domain
   Grd => Grid
@@ -1683,6 +1683,12 @@ subroutine ocean_velocity_end(Time, Velocity, use_blobs)
   integer :: stdoutunit 
   stdoutunit=stdout() 
 
+  if(.not. write_a_restart) then
+     write(stdoutunit,'(/a)') '==>Warning from ocean_velocity_mod (ocean_velocity_end): NO restart written.'
+     call mpp_error(WARNING,'==>Warning from ocean_velocity_mod (ocean_velocity_end): NO restart written.')
+     return
+  endif
+
   tau    = Time%tau
   taup1  = Time%taup1
 
@@ -1784,12 +1790,6 @@ subroutine ocean_velocity_chksum(Velocity, index, write_advection)
 
   integer :: stdoutunit 
   stdoutunit=stdout() 
-
-  if(.not. write_a_restart) then
-     write(stdoutunit,'(/a)') '==>Warning from ocean_velocity_mod (ocean_velocity_end): NO restart written.'
-     call mpp_error(WARNING,'==>Warning from ocean_velocity_mod (ocean_velocity_end): NO restart written.')
-     return
-  endif 
 
   if (PRESENT(write_advection)) then 
     writeadvection = write_advection

@@ -497,6 +497,12 @@ module ocean_sbc_mod
 !  for details.
 !  Default do_frazil_redist = .true. 
 !  </DATA>
+!  <DATA NAME="write_a_restart" TYPE="logical">
+!  Set true to write a restart.  False setting only for rare
+!  cases where wish to benchmark model without measuring the cost
+!  of writing restarts and associated chksums.
+!  Default is write_a_restart=.true.
+!  </DATA>
 !
 !</NAMELIST>
 !
@@ -507,6 +513,7 @@ use constants_mod,            only: epsln, hlv, hlf, kelvin, pi
 use diag_manager_mod,         only: register_diag_field, register_static_field, send_data
 use fms_mod,                  only: open_namelist_file, check_nml_error, file_exist
 use fms_mod,                  only: close_file, read_data, write_version_number
+use fms_mod,                  only: WARNING
 use fms_io_mod,               only: register_restart_field, save_restart, restore_state, restart_file_type
 use mpp_domains_mod,          only: mpp_update_domains, BGRID_NE, mpp_define_domains, mpp_get_compute_domain
 use mpp_domains_mod,          only: mpp_global_sum, BITWISE_EXACT_SUM, NON_BITWISE_EXACT_SUM
@@ -902,6 +909,7 @@ logical :: read_stokes_drift              =.false.
 logical :: do_langmuir                    =.false.
 logical :: do_ustar_correction            =.true.  ! In FAFMIP stress make this falsel
 logical :: do_frazil_redist               =.true.  ! In FAFMIP heat make this false to recover old (not recommended) behaviour.
+logical :: write_a_restart                =.true.
 
 real    :: constant_sss_for_restore       = 35.0
 real    :: constant_sst_for_restore       = 12.0
@@ -952,7 +960,7 @@ namelist /ocean_sbc_nml/ temp_restore_tscale, salt_restore_tscale, salt_restore_
          sbc_heat_fluxes_const, sbc_heat_fluxes_const_value, sbc_heat_fluxes_const_seasonal,                                 &
          use_constant_sss_for_restore, constant_sss_for_restore, use_constant_sst_for_restore, constant_sst_for_restore,     &
          use_ideal_calving, use_ideal_runoff, constant_hlf, constant_hlv, read_stokes_drift, do_langmuir,                    &
-         do_ustar_correction, do_frazil_redist
+         do_ustar_correction, do_frazil_redist, write_a_restart
 
 namelist /ocean_sbc_ofam_nml/ restore_mask_ofam, river_temp_ofam
 
@@ -1019,6 +1027,11 @@ subroutine ocean_sbc_init(Grid, Domain, Time, T_prog, T_diag, &
   write (stdoutunit,'(/)')
   write (stdoutunit, ocean_sbc_ofam_nml)
   write (stdlogunit, ocean_sbc_ofam_nml)
+
+  if(.not. write_a_restart) then
+    write(stdoutunit,'(a)') '==>Note: running ocean_sbc with write_a_restart=.false.'
+    write(stdoutunit,'(a)') '   Will NOT write restart file, and so cannot restart the run.'
+  endif
 
   if(do_bitwise_exact_sum) then
      global_sum_flag = BITWISE_EXACT_SUM
@@ -3207,9 +3220,17 @@ end subroutine ocean_sfc_restart
 subroutine ocean_sfc_end(Ocean_sfc)
   type(ocean_public_type), intent(in), target :: Ocean_sfc
 
-    call ocean_sfc_restart
+  integer :: stdoutunit
+  stdoutunit=stdout()
 
-    call ocean_tpm_sfc_end
+  if(.not. write_a_restart) then
+     write(stdoutunit,'(/a)') '==>Warning from ocean_sbc_mod (ocean_sfc_end): NO restart written.'
+     call mpp_error(WARNING,'==>Warning from ocean_sbc_mod (ocean_sfc_end): NO restart written.')
+  else
+     call ocean_sfc_restart
+  endif
+
+  call ocean_tpm_sfc_end
 
 end subroutine ocean_sfc_end
 ! </SUBROUTINE> NAME="ocean_sfc_end"
