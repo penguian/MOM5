@@ -19,6 +19,7 @@ CC := mpicc
 #########
 VERBOSE :=
 OPT := on
+REPRO := on
 
 MAKEFLAGS += --jobs=4
 

@@ -1,6 +1,7 @@
 #!/bin/csh -f
 # Minimal runscript for MOM experiments
 
+set echo
 set type          = MOM_solo       # type of the experiment
 set name          = box1
 set platform      = gfortran     # A unique identifier for your platform
@@ -8,11 +9,17 @@ set npes          = 8            # number of processor
                                  # Note: If you change npes you may need to change
                                  # the layout in the corresponding namelist
 set valid_npes = 0
+set layout = 0x0
 set help = 0
 set download = 0
 set debug = 0
+set dummy = 0
 set valgrind = 0
-set argv = (`getopt -u -o h -l type: -l platform: -l npes: -l experiment: -l debug -l valgrind -l help -l download_input_data --  $*`)
+set scorep_profile = 0
+set scorep_trace = 0
+set scalasca_profile = 0
+set scalasca_trace = 0
+set argv = (`getopt -u -o h -l type: -l platform: -l npes: -l layout: -l experiment: -l debug -l dummy -l valgrind -l scorep_profile -l scorep_trace -l scalasca_profile -l scalasca_trace -l help -l download_input_data --  $*`)
 while ("$argv[1]" != "--")
     switch ($argv[1])
         case --type:
@@ -21,12 +28,24 @@ while ("$argv[1]" != "--")
                 set platform = $argv[2]; shift argv; breaksw
         case --npes:
                 set npes = $argv[2]; shift argv; breaksw
+        case --layout:
+                set layout = $argv[2]; shift argv; breaksw
         case --experiment:
                 set name = $argv[2]; shift argv; breaksw
         case --debug:
                 set debug = 1; breaksw
+        case --dummy:
+                set dummy = 1; breaksw
         case --valgrind:
                 set valgrind = 1; breaksw
+        case --scorep_profile:
+                set scorep_profile = 1; breaksw
+        case --scorep_trace:
+                set scorep_trace = 1; breaksw
+        case --scalasca_profile:
+                set scalasca_profile = 1; breaksw
+        case --scalasca_trace:
+                set scalasca_trace = 1; breaksw
         case --help:
                 set help = 1;  breaksw
         case -h:
@@ -79,6 +98,8 @@ if ( $help ) then
     echo 
     echo "--npes       followed by the number of pes to be used for this experiment"
     echo
+    echo "--layout     followed by the layout of the experiment in the form rowsxcols. Note rows * cols must be at least npes"
+    echo
     echo "--download_input_data  download the input data for the test case"
     echo 
     echo "Note that the executable for the run should have been built before calling this script. See MOM_compile.csh"
@@ -86,17 +107,28 @@ if ( $help ) then
     exit 1
 endif
 
+set rows = `echo $layout | cut -d'x' -f1`
+set cols = `echo $layout | cut -d'x' -f2`
+@ rowsxcols = $rows * $cols
+
 set root          = $cwd:h         # The directory in which you checked out src
 set code_dir      = $root/src                         # source code directory
 set workdir       = $root/work     # where the model is run and model output is produced
                                    # This is recommended to be a link to the $WORKDIR of the platform.
 set expdir        = $workdir/$name
+if ( -d $expdir.$platform ) then
+    set expdir    = $expdir.$platform
+endif
 set inputDataDir  = $expdir/INPUT   # This is path to the directory that contains the input data for this experiment.
                                      # You should have downloaded and untared this directory from MOM4p1 FTP site.
 set diagtable     = $inputDataDir/diag_table  # path to diagnositics table
 set datatable     = $inputDataDir/data_table  # path to the data override table.
 set fieldtable    = $inputDataDir/field_table # path to the field table
-set namelist      = $inputDataDir/input.nml   # path to namelist file
+if ( $rowsxcols ) then
+    set namelist  = $inputDataDir/input.$layout.nml   # path to namelist file
+else
+    set namelist  = $inputDataDir/input.nml   # path to namelist file
+endif
 
 set executable    = $root/exec/$platform/$type/fms_$type.x      # executable created after compilation
 
@@ -115,6 +147,7 @@ endif
 # Users must ensure the correct environment file exists for their platform.
 #
 source $root/bin/environs.$platform  # environment variables and loadable modules
+# setenv mpirunCommand "echo mpirun --mca orte_base_help_aggregate 0 -np"
 
 set mppnccombine  = $root/bin/mppnccombine.$platform  # path to executable mppnccombine
 set time_stamp    = $root/bin/time_stamp.csh          # path to cshell to generate the date
@@ -198,14 +231,49 @@ if ( $name  == mom4p1_ebm1 & $npes != 17) then
     set valid_npes = 17
 endif
 
-if ( $name  == global_0.25_degree_NYF & $npes != 960) then
-    set valid_npes = 960
+# if ( $name  == global_0.25_degree_NYF & $npes != 960) then
+#    set valid_npes = 960
+# endif
+
+set WD = `pwd`
+set runCommand = "$mpirunCommand $npes -wd $WD $executable >fms.out"
+if ( $valgrind ) then
+    set runCommand = "$mpirunCommand $npes -wd $WD                              valgrind --gen-suppressions=all --suppressions=$OPENMPI_BASE/share/openmpi/openmpi-valgrind.supp --main-stacksize=1000000000 --max-stackframe=1000000000 --error-limit=no --log-file=raw-$layout.log $executable >fms.out"
+#   set runCommand = "$mpirunCommand $npes -x LD_PRELOAD=$VALGRIND_MPI_WRAPPERS valgrind --gen-suppressions=all --suppressions=$root/test/valgrind_suppressions.txt              --main-stacksize=2000000000 --max-stackframe=2000000000 --error-limit=no $executable >fms.out"
 endif
 
+if ( $scorep_profile ) then
+    module load scorep
+    setenv SCOREP_ENABLE_PROFILING true
+    setenv SCOREP_ENABLE_TRACING false
+    setenv SCOREP_EXPERIMENT_DIRECTORY "profile.$PBS_JOBID"
+endif
 
-set runCommand = "$mpirunCommand $npes $executable >fms.out"
-if ( $valgrind ) then
-    set runCommand = "$mpirunCommand $npes -x LD_PRELOAD=$VALGRIND_MPI_WRAPPERS valgrind --gen-suppressions=all --suppressions=../../test/valgrind_suppressions.txt --main-stacksize=2000000000 --max-stackframe=2000000000 --error-limit=no $executable >fms.out"
+if ( $scorep_trace ) then
+    module load scorep
+    setenv SCOREP_ENABLE_PROFILING true
+    setenv SCOREP_ENABLE_TRACING true
+    setenv SCOREP_EXPERIMENT_DIRECTORY "trace.$PBS_JOBID" 
+    setenv SCOREP_FILTERING_FILE "$WD/config/scorep.filt"
+    setenv SCOREP_TOTAL_MEMORY 800M
+endif
+
+if ( $scalasca_profile ) then
+    setenv SCAN_TARGET $executable
+    setenv SCAN_MPI_RANKS $npes
+    setenv SCOREP_EXPERIMENT_DIRECTORY "scorep_scalasca-profile.$PBS_JOBID"
+    setenv SCOREP_FILTERING_FILE "$WD/config/scorep.filt"
+    setenv SCOREP_TOTAL_MEMORY 800M
+endif
+
+if ( $scalasca_trace ) then
+    setenv SCAN_TARGET $executable
+    setenv SCAN_MPI_RANKS $npes
+    setenv SCAN_TRACE_ANALYZER "scout.mpi"
+    setenv SCAN_ANALYZE_OPTS "--time-correct"
+    setenv SCOREP_EXPERIMENT_DIRECTORY "scorep_scalasca-trace.$PBS_JOBID" 
+    setenv SCOREP_FILTERING_FILE "$WD/config/scorep.filt"
+    setenv SCOREP_TOTAL_MEMORY 800M
 endif
 
 if ( $debug ) then
@@ -216,11 +284,19 @@ echo "About to run experiment $name with model $type at `date`. The command is: 
 
 if ( $valid_npes ) then
     echo "ERROR: This experiment is designed to run on $valid_npes pes. Please specify --npes  $valid_npes "
-    echo "Note:  In order to change the default npes for an expeiment the user may need to edit the values of layouts and atmos_npes and ocean_npes in the input.nml and run the mpi command manually in the working dir"
+    echo "Note:  In order to change the default npes for an experiment the user may need to edit the values of layouts and atmos_npes and ocean_npes in the input.nml and run the mpi command manually in the working dir"
+    exit 1
+endif
+
+if ( $name == global_0.25_degree_NYF & $npes > $rowsxcols ) then
+    echo "ERROR: npes $npes > layout $layout : Please make layout larger."
     exit 1
 endif
 
 # Run the model
+if ( $dummy ) then
+    exit 0
+endif
 $runCommand
 set model_status = $status
 if ( $model_status != 0) then
